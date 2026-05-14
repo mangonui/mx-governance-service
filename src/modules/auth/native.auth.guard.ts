@@ -69,16 +69,26 @@ export class NativeAuthGuard implements CanActivate {
 
         try {
             const userInfo = await this.authServer.validate(jwt);
+            // ISSUE-041: previously an Origin mismatch was logged at info
+            // level and the request was authenticated anyway, breaking the
+            // anti-replay binding NativeAuth is supposed to provide. Fail
+            // closed: a token issued for `userInfo.origin` must be used
+            // from that origin (with or without the https:// prefix).
+            // The localhost exemption preserves the dev workflow. If
+            // cross-origin service-to-service use becomes a requirement,
+            // express it as an explicit acceptedOrigins allowlist on the
+            // server config — not by re-disabling this check.
             if (
                 !UrlUtils.isLocalhost(origin) &&
                 origin !== userInfo.origin &&
                 origin !== 'https://' + userInfo.origin
             ) {
-                this.logger.info('Unhandled auth origin: ', {
+                this.logger.warn('NativeAuth origin mismatch (rejected):', {
                     origin,
-                    userInfo,
+                    tokenOrigin: userInfo.origin,
+                    address: userInfo.address,
                 });
-                // TO DO:  throw new NativeAuthInvalidOriginError(userInfo.origin, origin);
+                throw new UnauthorizedException('NativeAuth origin mismatch');
             }
 
             req.res.set('X-Native-Auth-Issued', userInfo.issued);
